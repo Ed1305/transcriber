@@ -1,0 +1,6 @@
+{
+  "name": "Transcriber",
+  "description": "Smart audio transcription and speaker diarization app with timestamps, real-time audio playback sync, and export formats.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

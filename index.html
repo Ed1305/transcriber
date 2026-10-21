@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Transcriber - Audio & Video Speech-to-Text with Speaker Diarization</title>
+    <meta name="description" content="Smart audio transcription and speaker diarization app with timestamps, real-time audio playback sync, and export formats." />
+    <meta property="og:title" content="Transcriber - Audio & Video Speech-to-Text with Speaker Diarization" />
+    <meta property="og:description" content="Smart audio transcription and speaker diarization app with timestamps, real-time audio playback sync, and export formats." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+      (function() {
+        // Suppress harmless Vite HMR WebSocket connection errors in Cloud Run preview
+        const origError = console.error;
+        console.error = function(...args) {
+          const msg = args.map(function(a) {
+            return typeof a === 'string' ? a : (a && a.message ? a.message : (a && a.stack ? a.stack : ''));
+          }).join(' ');
+          if (msg.includes('WebSocket') || msg.includes('@vite/client') || msg.includes('createWebSocketModuleRunnerTransport')) {
+            return;
+          }
+          origError.apply(console, args);
+        };
+
+        window.addEventListener('error', function(e) {
+          var msg = e.message || '';
+          var fn = e.filename || '';
+          if (msg.includes('WebSocket') || msg.includes('@vite/client') || fn.includes('@vite/client') || (e.error && (e.error.stack || '').includes('@vite/client'))) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(e) {
+          var reason = e.reason;
+          var msg = (typeof reason === 'string' ? reason : (reason && reason.message ? reason.message : (reason && reason.stack ? reason.stack : ''))) + '';
+          if (msg.includes('WebSocket') || msg.includes('@vite/client') || msg.includes('createWebSocketModuleRunnerTransport')) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
