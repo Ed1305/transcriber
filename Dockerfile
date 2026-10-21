@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Install dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 # Build production assets
 COPY . .
@@ -21,11 +21,12 @@ ENV PORT=3000
 
 # Install production dependencies
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm ci --omit=dev
 
 # Copy compiled frontend and server
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server.ts ./server.ts
+COPY --from=builder /app/api ./api
 
 EXPOSE 3000
 
