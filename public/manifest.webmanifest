@@ -1,0 +1,27 @@
+{
+  "name": "Transcriber - Audio & Video Speech-to-Text",
+  "short_name": "Transcriber",
+  "description": "Smart audio transcription and speaker diarization app with timestamps, real-time audio playback sync, and export formats.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#47704C",
+  "theme_color": "#47704C",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

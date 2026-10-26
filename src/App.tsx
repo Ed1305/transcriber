@@ -445,9 +445,13 @@ export default function App() {
       {/* ============================================================== */}
       {currentView === 'upload' && (
         <div className="w-full max-w-[560px] bg-white rounded-lg shadow-xl p-5 sm:p-7 animate-in fade-in duration-150">
-          {/* Page Header: Cloud Icon + "Transcribe Files" */}
+          {/* Page Header: Logo + "Transcribe Files" */}
           <div className="flex items-center justify-center gap-2.5 mb-5">
-            <UploadCloud className="w-6 h-6 text-[#292929] stroke-[2.2]" />
+            <img
+              src="/icon-192.png"
+              alt="Transcriber logo"
+              className="w-6 h-6 rounded-md shadow-sm"
+            />
             <h1 className="text-xl sm:text-[22px] font-bold text-[#292929] tracking-tight">
               Transcribe Files
             </h1>
