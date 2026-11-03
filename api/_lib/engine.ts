@@ -16,13 +16,7 @@
 
 import { GoogleGenAI, Type } from '@google/genai';
 
-const DEFAULT_GEMINI_MODELS = [
-  'gemini-3.8-flash',
-  'gemini-flash-latest',
-  'gemini-2.5-flash',
-  'gemini-flash-lite-latest',
-  'gemini-2.5-flash-lite',
-];
+const DEFAULT_GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-flash-lite-latest'];
 const DEFAULT_GROQ_CHAT_MODELS = ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'llama-3.1-8b-instant'];
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
@@ -169,9 +163,11 @@ CRITICAL SPEAKER DIARIZATION INSTRUCTIONS:
    - Ensure timestamps flow chronologically and accurately mirror when the speech occurs.
 
 3. Verbatim Precision:
-   - Transcribe every spoken word accurately.
-   - Fix stutters gracefully while preserving meaningful fillers or pauses.
-   ${language && language !== 'auto' ? `- Expected audio language: ${language}.` : '- Automatically detect the primary language.'}
+   - Transcribe every spoken word exactly as said, in the ORIGINAL spoken language. NEVER translate. If speakers switch languages (e.g. French and Lingala), write each part in the language actually spoken.
+   - Do not summarize, paraphrase, correct grammar or invent words. If a word is truly unintelligible, write [inaudible] rather than guessing.
+   - Spell names, numbers, phone numbers, amounts and dates exactly as spoken.
+   - The audio may be a low-quality phone call (8 kHz); listen carefully and use context to resolve unclear words.
+   ${language && language !== 'auto' ? `- Expected audio language: ${language} (but transcribe any other language exactly as spoken).` : '- Automatically detect the language(s) spoken.'}
    ${customPrompt ? `- Additional context: ${customPrompt}` : ''}
 
 4. Executive Summary & Takeaways:
@@ -268,7 +264,7 @@ async function transcribeWithGemini(model: string, media: Media, input: Transcri
 const LANGUAGE_CODES: Record<string, string> = {
   english: 'en', spanish: 'es', french: 'fr', german: 'de', italian: 'it', portuguese: 'pt',
   japanese: 'ja', chinese: 'zh', korean: 'ko', arabic: 'ar', russian: 'ru', hindi: 'hi', dutch: 'nl',
-  swahili: 'sw', turkish: 'tr', polish: 'pl',
+  swahili: 'sw', turkish: 'tr', polish: 'pl', lingala: 'ln',
 };
 
 const WHISPER_EXT: Record<string, string> = {
@@ -308,6 +304,7 @@ async function whisperTranscribe(model: string, media: Media, input: TranscribeI
   form.append('model', model);
   form.append('response_format', 'verbose_json');
   form.append('timestamp_granularities[]', 'segment');
+  form.append('temperature', '0');
   const code = input.language ? LANGUAGE_CODES[input.language.toLowerCase()] : undefined;
   if (code) form.append('language', code);
   if (input.customPrompt) form.append('prompt', input.customPrompt.slice(0, 800));
@@ -516,9 +513,11 @@ type ChainStep = { provider: 'gemini' | 'groq'; model: string };
  * waiting on every Gemini variant. Override with TRANSCRIBE_CHAIN, e.g.
  * "gemini:gemini-3.8-flash,groq:whisper-large-v3".
  */
+// gemini-2.5-* models were removed: Google now returns 404 "no longer available to new users".
+// Whisper large-v3 comes before the Flash-Lite model because it is the more accurate transcriber.
 const DEFAULT_CHAIN =
-  'gemini:gemini-3.8-flash,gemini:gemini-flash-latest,groq:whisper-large-v3,gemini:gemini-2.5-flash,' +
-  'groq:whisper-large-v3-turbo,gemini:gemini-flash-lite-latest,gemini:gemini-2.5-flash-lite';
+  'gemini:gemini-3.8-flash,gemini:gemini-flash-latest,groq:whisper-large-v3,' +
+  'gemini:gemini-flash-lite-latest,groq:whisper-large-v3-turbo';
 
 function parseChain(): ChainStep[] {
   return (process.env.TRANSCRIBE_CHAIN || DEFAULT_CHAIN)
