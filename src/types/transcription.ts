@@ -29,6 +29,7 @@ export interface TranscriptionData {
   keyTopics?: string[];
   actionItems?: string[];
   duration?: number;
+  engine?: string; // model that produced the transcript, e.g. "Gemini · gemini-3.8-flash"
 }
 
 export interface SavedTranscription {

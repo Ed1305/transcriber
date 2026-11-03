@@ -921,6 +921,12 @@ export default function App() {
               <span className="capitalize">{activeTranscription.languageDetected || 'English'}</span>
               <span>•</span>
               <span>{Math.round(duration)} seconds</span>
+              {activeTranscription.engine && (
+                <>
+                  <span>•</span>
+                  <span title="Model that produced this transcript">{activeTranscription.engine}</span>
+                </>
+              )}
             </div>
           </div>
 
