@@ -2,16 +2,17 @@
 // Express server (server.ts). Files under api/_lib are not exposed as routes by Vercel.
 //
 // Transcription tries a chain of free models, best first, and moves to the next one
-// whenever a model is overloaded, rate-limited, unavailable or otherwise fails:
+// whenever a model is overloaded, rate-limited, hangs past its time limit or otherwise fails.
+// Two kinds of step (see DEFAULT_CHAIN for the order):
 //
-//   1. Gemini models (GEMINI_API_KEY)  - listen to the audio directly, so they give real
-//      voice-based speaker diarization plus title/summary/topics in a single call.
-//   2. Groq Whisper (GROQ_API_KEY)     - whisper-large-v3 is the most accurate free
-//      speech-to-text model. Whisper has no diarization, so a free Groq LLM then labels
-//      speakers from the text and writes the title/summary.
+//   - Gemini (GEMINI_API_KEY): listens to the audio directly, so it gives real
+//     voice-based speaker diarization plus title/summary/topics in a single call.
+//   - Groq Whisper (GROQ_API_KEY): whisper-large-v3 is the most accurate free
+//     speech-to-text model. Whisper has no diarization, so a free Groq LLM then labels
+//     speakers from the text and writes the title/summary.
 //
-// Both chains can be overridden with comma-separated env vars: GEMINI_MODELS, GROQ_WHISPER_MODELS,
-// GROQ_CHAT_MODELS.
+// Overrides (comma-separated): TRANSCRIBE_CHAIN ("provider:model,..."), GEMINI_MODELS
+// (used by ask-transcript), GROQ_CHAT_MODELS.
 
 import { GoogleGenAI, Type } from '@google/genai';
 
@@ -22,7 +23,6 @@ const DEFAULT_GEMINI_MODELS = [
   'gemini-flash-lite-latest',
   'gemini-2.5-flash-lite',
 ];
-const DEFAULT_GROQ_WHISPER_MODELS = ['whisper-large-v3', 'whisper-large-v3-turbo'];
 const DEFAULT_GROQ_CHAT_MODELS = ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'llama-3.1-8b-instant'];
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
@@ -58,20 +58,8 @@ function errStatus(err: any): number | undefined {
   return typeof s === 'number' ? s : undefined;
 }
 
-function isTransient(err: any): boolean {
-  const s = errStatus(err);
-  if (s === 429 || s === 500 || s === 502 || s === 503 || s === 504) return true;
-  return /UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|overloaded|rate limit|ECONNRESET|ETIMEDOUT|fetch failed/i.test(
-    String(err?.message || '')
-  );
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 /** Total time we allow for the whole chain; Vercel kills functions at 300s. */
 const TOTAL_BUDGET_MS = 280_000;
-/** Time kept back for the Groq fallback when it is configured. */
-const GROQ_RESERVE_MS = 60_000;
 
 type Attempt = { model: string; error: string };
 
@@ -400,11 +388,11 @@ ${lines.join('\n')}`;
 }
 
 async function transcribeWithGroq(model: string, media: Media, input: TranscribeInput, deadline: number) {
-  const whisper = await whisperTranscribe(model, media, input, Math.min(150_000, deadline - Date.now()));
+  const whisper = await whisperTranscribe(model, media, input, Math.min(90_000, deadline - Date.now()));
 
   let analysis: any = {};
   try {
-    analysis = await analyzeWhisperTranscript(whisper.segments, input, Math.max(5_000, Math.min(60_000, deadline - Date.now())));
+    analysis = await analyzeWhisperTranscript(whisper.segments, input, Math.max(5_000, Math.min(30_000, deadline - Date.now())));
   } catch (err) {
     // The transcript itself is the important part; carry on with one speaker if labelling fails.
     console.warn(`[Transcribe] speaker/summary analysis failed, using single speaker: ${shortError(err)}`);
@@ -520,6 +508,42 @@ function normalize(parsedData: any, engine: string) {
 // Public API
 // ---------------------------------------------------------------------------
 
+type ChainStep = { provider: 'gemini' | 'groq'; model: string };
+
+/**
+ * Default order, best first. Groq Whisper sits third so that when Google is overloaded
+ * (all Gemini models tend to be busy at the same time) we reach it quickly instead of
+ * waiting on every Gemini variant. Override with TRANSCRIBE_CHAIN, e.g.
+ * "gemini:gemini-3.8-flash,groq:whisper-large-v3".
+ */
+const DEFAULT_CHAIN =
+  'gemini:gemini-3.8-flash,gemini:gemini-flash-latest,groq:whisper-large-v3,gemini:gemini-2.5-flash,' +
+  'groq:whisper-large-v3-turbo,gemini:gemini-flash-lite-latest,gemini:gemini-2.5-flash-lite';
+
+function parseChain(): ChainStep[] {
+  return (process.env.TRANSCRIBE_CHAIN || DEFAULT_CHAIN)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const i = item.indexOf(':');
+      const provider = (i > 0 ? item.slice(0, i) : 'gemini').toLowerCase();
+      const model = i > 0 ? item.slice(i + 1) : item;
+      return { provider: provider === 'groq' ? 'groq' : 'gemini', model } as ChainStep;
+    });
+}
+
+/**
+ * How long a single Gemini attempt may take. An overloaded Gemini model often hangs instead
+ * of failing, so each attempt is capped relative to the audio length; otherwise one stuck
+ * model would use up the whole function budget before any fallback runs.
+ */
+function geminiAttemptTimeout(media: Media): number {
+  const bytes = media.base64.length * 0.75;
+  const estSeconds = bytes / 2000; // upper bound: speech MP3s are rarely below 16 kbps
+  return Math.round(Math.min(120_000, Math.max(30_000, 30_000 + estSeconds * 250)));
+}
+
 export async function transcribe(input: TranscribeInput) {
   const hasGemini = !!process.env.GEMINI_API_KEY;
   const hasGroq = !!process.env.GROQ_API_KEY;
@@ -533,51 +557,37 @@ export async function transcribe(input: TranscribeInput) {
   );
 
   const deadline = Date.now() + TOTAL_BUDGET_MS;
+  const geminiTimeout = geminiAttemptTimeout(media);
   const attempts: Attempt[] = [];
 
-  if (hasGemini) {
-    const models = envList('GEMINI_MODELS', DEFAULT_GEMINI_MODELS);
-    for (const model of models) {
-      const reserve = hasGroq ? GROQ_RESERVE_MS : 0;
-      const remaining = deadline - Date.now() - reserve;
-      if (remaining < 15_000) break;
-      // One quick retry on a transient error, then move on to the next model.
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          console.log(`[Transcribe] trying Gemini ${model}${attempt ? ' (retry)' : ''}`);
-          const parsed = await transcribeWithGemini(model, media, input, deadline - Date.now() - reserve);
-          console.log(`[Transcribe] success with Gemini ${model}`);
-          return normalize(parsed, `Gemini · ${model}`);
-        } catch (err: any) {
-          console.warn(`[Transcribe] Gemini ${model} failed: ${shortError(err)}`);
-          if (attempt === 0 && isTransient(err) && errStatus(err) !== 429 && deadline - Date.now() - reserve > 30_000) {
-            await sleep(1500);
-            continue;
-          }
-          attempts.push({ model, error: shortError(err) });
-          break;
-        }
-      }
-    }
-  }
+  for (const step of parseChain()) {
+    if (step.provider === 'gemini' && !hasGemini) continue;
+    if (step.provider === 'groq' && !hasGroq) continue;
+    const remaining = deadline - Date.now();
+    if (remaining < 15_000) break;
 
-  if (hasGroq) {
-    for (const model of envList('GROQ_WHISPER_MODELS', DEFAULT_GROQ_WHISPER_MODELS)) {
-      if (deadline - Date.now() < 10_000) break;
-      try {
-        console.log(`[Transcribe] trying Groq ${model}`);
-        const parsed = await transcribeWithGroq(model, media, input, deadline);
-        console.log(`[Transcribe] success with Groq ${model}`);
-        return normalize(parsed, `Groq · ${model}`);
-      } catch (err: any) {
-        console.warn(`[Transcribe] Groq ${model} failed: ${shortError(err)}`);
-        attempts.push({ model, error: shortError(err) });
-      }
+    const label = `${step.provider === 'gemini' ? 'Gemini' : 'Groq'} · ${step.model}`;
+    const started = Date.now();
+    try {
+      console.log(`[Transcribe] trying ${label}`);
+      const parsed =
+        step.provider === 'gemini'
+          ? await transcribeWithGemini(step.model, media, input, Math.min(geminiTimeout, remaining))
+          : await transcribeWithGroq(step.model, media, input, deadline);
+      console.log(`[Transcribe] success with ${label} in ${Date.now() - started}ms`);
+      return normalize(parsed, label);
+    } catch (err: any) {
+      const aborted = err?.name === 'AbortError' || /abort/i.test(String(err?.message || ''));
+      const error = aborted ? `timed out after ${Math.round((Date.now() - started) / 1000)}s` : shortError(err);
+      console.warn(`[Transcribe] ${label} failed: ${error}`);
+      attempts.push({ model: step.model, error });
     }
   }
 
   console.error(`[Transcribe] all models failed: ${summarizeAttempts(attempts)}`);
-  const allBusy = attempts.length > 0 && attempts.every((a) => /^(429|5\d\d)|high demand|overloaded|UNAVAILABLE|RESOURCE_EXHAUSTED/i.test(a.error));
+  const allBusy =
+    attempts.length > 0 &&
+    attempts.every((a) => /^(429|5\d\d)|high demand|overloaded|UNAVAILABLE|RESOURCE_EXHAUSTED|timed out/i.test(a.error));
   throw new EngineError(
     allBusy
       ? 'All free transcription models are busy or rate-limited right now. Please wait a minute and try again.'
@@ -600,7 +610,7 @@ Provide a direct, helpful, and concise answer based strictly on the transcript. 
   const attempts: Attempt[] = [];
   if (process.env.GEMINI_API_KEY) {
     for (const model of envList('GEMINI_MODELS', DEFAULT_GEMINI_MODELS)) {
-      const t = withTimeout(60_000);
+      const t = withTimeout(25_000);
       try {
         const r = await gemini().models.generateContent({
           model,
@@ -626,7 +636,7 @@ Provide a direct, helpful, and concise answer based strictly on the transcript. 
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }] }),
           },
-          60_000
+          30_000
         );
         const text = json?.choices?.[0]?.message?.content;
         if (text) return text;
