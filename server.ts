@@ -29,6 +29,42 @@ const ai = new GoogleGenAI({
   },
 });
 
+// Gemini returns 503 (model overloaded) / 429 (rate limited) fairly often under load.
+// Retry with backoff, then fall back to a second model, instead of failing the whole request.
+const PRIMARY_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+const FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || 'gemini-flash-latest';
+
+function isRetryableGeminiError(err: any): boolean {
+  const status = err?.status ?? err?.code;
+  if (status === 429 || status === 500 || status === 503 || status === 504) return true;
+  const msg = String(err?.message || '');
+  return /UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|overloaded/i.test(msg);
+}
+
+async function generateWithRetry(params: any): Promise<any> {
+  const models = Array.from(new Set([PRIMARY_MODEL, FALLBACK_MODEL]));
+  let lastErr: any;
+  for (const model of models) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await ai.models.generateContent({ ...params, model });
+      } catch (err: any) {
+        lastErr = err;
+        if (!isRetryableGeminiError(err)) throw err;
+        const delay = 2000 * 2 ** attempt + Math.floor(Math.random() * 500);
+        console.warn(`[Gemini] ${model} attempt ${attempt + 1} failed (${err?.status || 'error'}), retrying in ${delay}ms`);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  }
+  const e: any = new Error(
+    'The Gemini AI service is currently overloaded (high demand). Please wait a minute and try again.'
+  );
+  e.status = 503;
+  e.cause = lastErr;
+  throw e;
+}
+
 // Transcription endpoint
 app.post('/api/transcribe', async (req: Request, res: Response) => {
   try {
@@ -188,8 +224,7 @@ CRITICAL SPEAKER DIARIZATION INSTRUCTIONS:
     };
 
     // Use gemini-3.8-flash for robust multimodal understanding and JSON schema output
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const response = await generateWithRetry({
       contents: [
         {
           role: 'user',
@@ -324,7 +359,7 @@ CRITICAL SPEAKER DIARIZATION INSTRUCTIONS:
     });
   } catch (error: any) {
     console.error('Transcription error:', error);
-    return res.status(500).json({
+    return res.status(error?.status === 503 ? 503 : 500).json({
       error: error?.message || 'Failed to transcribe audio. Please try again.',
       details: error?.toString(),
     });
@@ -340,8 +375,7 @@ app.post('/api/ask-transcript', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'transcriptText and question are required' });
     }
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const response = await generateWithRetry({
       contents: [
         {
           role: 'user',

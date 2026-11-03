@@ -245,6 +245,16 @@ export default function App() {
     });
   };
 
+  const describeHttpError = (status: number) => {
+    if (status === 413)
+      return 'This file is too large to upload (the server accepts about 3 MB of audio per request). Please compress it (e.g. export as a lower-bitrate MP3) or trim it, then try again.';
+    if (status === 504)
+      return 'The transcription took too long and the server timed out. Please try a shorter audio file.';
+    if (status === 503 || status === 429)
+      return 'The AI service is busy right now. Please wait a minute and try again.';
+    return `Server returned error (${status})`;
+  };
+
   // Start transcription process
   const handleStartTranscribe = async () => {
     if (!selectedFile) {
@@ -257,7 +267,8 @@ export default function App() {
     setTranscribeStep('Reading audio file...');
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 90000);
+    // Server functions may run up to 300s (vercel.json maxDuration), so don't give up before that.
+    const timeoutId = setTimeout(() => controller.abort(), 295000);
 
     // Dynamic progress ticker to show active status so it never feels stuck
     const progressStages = [
@@ -296,7 +307,7 @@ export default function App() {
 
         const json = await res.json().catch(() => ({}));
         if (!res.ok || !json.success) {
-          throw new Error(json.error || `Server returned error (${res.status})`);
+          throw new Error(json.error || describeHttpError(res.status));
         }
 
         data = json.data;
@@ -318,7 +329,7 @@ export default function App() {
 
         const json = await res.json().catch(() => ({}));
         if (!res.ok || !json.success) {
-          throw new Error(json.error || `Server returned error (${res.status})`);
+          throw new Error(json.error || describeHttpError(res.status));
         }
 
         data = json.data;
@@ -350,7 +361,7 @@ export default function App() {
       clearInterval(progressInterval);
       console.error(err);
       if (err.name === 'AbortError') {
-        setErrorMessage('Transcription timed out after 90 seconds. Please try a shorter audio file or check your network connection.');
+        setErrorMessage('Transcription timed out after 5 minutes. Please try a shorter audio file or check your network connection.');
       } else {
         setErrorMessage(err.message || 'Error transcribing media. Please try again.');
       }
