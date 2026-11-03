@@ -42,7 +42,20 @@ export default function App() {
   // File upload state
   const [selectedFile, setSelectedFile] = useState<{ name: string; size?: number; blob?: Blob; url?: string } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [audioLanguage, setAudioLanguage] = useState('English');
+  // Default to auto-detect: forcing the wrong language makes the models mistranscribe or translate.
+  const [audioLanguage, setAudioLanguageState] = useState<string>(() => {
+    try {
+      return localStorage.getItem('transcriber_language') || 'auto';
+    } catch {
+      return 'auto';
+    }
+  });
+  const setAudioLanguage = (value: string) => {
+    setAudioLanguageState(value);
+    try {
+      localStorage.setItem('transcriber_language', value);
+    } catch {}
+  };
   const [transcriptionMode, setTranscriptionMode] = useState<'cheetah' | 'dolphin' | 'whale'>('whale');
   const [showMoreSettings, setShowMoreSettings] = useState(false);
   const [expectedSpeakers, setExpectedSpeakers] = useState<number | ''>('');
@@ -597,12 +610,17 @@ export default function App() {
                   onChange={(e) => setAudioLanguage(e.target.value)}
                   className="w-full h-[38px] bg-white border border-[#d0d0d0] rounded-md px-3 text-xs sm:text-sm text-[#292929] focus:outline-none focus:border-[#0878F9] appearance-none cursor-pointer"
                 >
+                  <option value="auto">Auto detect (recommended)</option>
                   <option value="English">English 🇺🇸</option>
-                  <option value="Spanish">Spanish (Español) 🇪🇸</option>
                   <option value="French">French (Français) 🇫🇷</option>
+                  <option value="Lingala">Lingala</option>
+                  <option value="Swahili">Swahili (Kiswahili)</option>
+                  <option value="Spanish">Spanish (Español) 🇪🇸</option>
+                  <option value="Portuguese">Portuguese (Português) 🇵🇹</option>
+                  <option value="Arabic">Arabic (العربية)</option>
                   <option value="German">German (Deutsch) 🇩🇪</option>
                   <option value="Italian">Italian (Italiano) 🇮🇹</option>
-                  <option value="Portuguese">Portuguese (Português) 🇵🇹</option>
+                  <option value="Dutch">Dutch (Nederlands) 🇳🇱</option>
                   <option value="Japanese">Japanese (日本語) 🇯🇵</option>
                   <option value="Chinese">Chinese (中文) 🇨🇳</option>
                 </select>
