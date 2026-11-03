@@ -243,7 +243,7 @@ export const AudioUploader: React.FC<AudioUploaderProps> = ({
                   Drag and drop your audio or video file here
                 </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Supports MP3, WAV, M4A, WEBM, OGG, FLAC, AAC (up to 100MB)
+                  Supports MP3, WAV, M4A, WEBM, OGG, FLAC, AAC (about 3MB max per upload)
                 </p>
               </div>
             )}
